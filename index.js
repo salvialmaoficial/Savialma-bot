@@ -203,8 +203,9 @@ app.post('/webhook', async (req, res) => {
     // ESPERANDO NOMBRE (se revisa ANTES que paso 0)
     // --------------------------------------------------------
     if (u.esperandoNombre) {
-      const nombre = detectarNombre(texto) || texto.split(' ')[0];
-      u.nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+      const palabras = texto.trim().split(/\s+/);
+      const nombreDetectado = detectarNombre(texto) || palabras[palabras.length - 1];
+      u.nombre = nombreDetectado.charAt(0).toUpperCase() + nombreDetectado.slice(1).toLowerCase();
       u.esperandoNombre = false;
 
       if (!u.metodo) {
@@ -285,12 +286,12 @@ app.post('/webhook', async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // PASO 2: Respuesta después de testimonios
+    // PASO 2: Respuesta después de testimonios → micro-pregunta
     // --------------------------------------------------------
     if (u.paso === 2) {
       if (esMensajeCorto(texto)) {
         u.paso = 3;
-        await enviarTexto(from, mensajes[u.metodo][3](u.nombre));
+        await enviarTexto(from, `¿Qué es lo que más te detiene hoy para empezar algo así?`);
       } else {
         // Mensaje largo — notificarme y no responder
         u.bloqueado = true;
@@ -300,19 +301,28 @@ app.post('/webhook', async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // PASO 3 en adelante: después del precio
+    // PASO 3: Respuesta a la micro-pregunta → notificarme con
+    // todo el contexto para que tú cierres manualmente
     // --------------------------------------------------------
     if (u.paso === 3) {
-      if (esMensajeCorto(texto)) {
-        // Reforzar con el link directo
-        await enviarTexto(from, `Aquí tienes el link directo para que lo veas todo 👇\n${links[u.metodo]}`);
-        u.paso = 4;
-      } else {
-        // Notificarme
-        u.bloqueado = true;
-        await notificarme(`⚠️ PROSPETA LISTA PARA CERRAR\nNombre: ${u.nombre}\nNúmero: +${from}\nPaís: ${pais}\nMétodo: ${u.metodo}\nDijo: "${texto}"\n\nToma el control para cerrar la venta 💰`);
-      }
+      u.bloqueado = true;
+      await notificarme(`🔥 LISTA PARA CERRAR\nNombre: ${u.nombre}\nNúmero: +${from}\nPaís: ${pais}\nMétodo: ${u.metodo}\n\nLe detiene: "${texto}"\n\nEntra y cierra manualmente con el link correcto 💰`);
       return;
+    }
+
+    // --------------------------------------------------------
+    // CAMBIO DE MÉTODO: si en cualquier punto menciona otro método
+    // diferente al actual, reiniciar la secuencia con ese método
+    // --------------------------------------------------------
+    if (u.paso >= 1) {
+      const metodoMencionado = detectarMetodo(texto);
+      if (metodoMencionado && metodoMencionado !== u.metodo) {
+        u.metodo = metodoMencionado;
+        u.paso = 1;
+        u.bloqueado = false;
+        await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
+        return;
+      }
     }
 
     // --------------------------------------------------------
