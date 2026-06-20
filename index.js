@@ -327,6 +327,9 @@ app.post('/webhook', async (req, res) => {
 
   } catch (error) {
     console.error('Error en webhook:', error.message);
+    if (error.response) {
+      console.error('Detalle del error:', JSON.stringify(error.response.data));
+    }
   }
 });
 
