@@ -8,7 +8,7 @@ app.use(express.json());
 // ============================================================
 const VERIFY_TOKEN = "savialma2024";
 const WHATSAPP_TOKEN = "EAAONx37Ww6ABRqHZClExpi72sZBcy4RLxJnIlU45p2v6ZBInJvpHN96aWucgVCZAOYgBD7O9hA4g8Sqo9HVaMfTleLmRzY1WRBTvfZCvCBJpNXuVokp6QemA4nUxmoKf1qfUzXoOx2sFbIof2edXZA8A3aPJCDmZAWICZAjfU70D7UuVGpZAsXAZCwGeEwZAjFnOAP9xgZDZD";
-const PHONE_NUMBER_ID = "1228361870353010";
+const PHONE_NUMBER_ID = "1214160008441416";
 const MI_NUMERO = "573209116688"; // Tu número para notificaciones
 
 // ============================================================
@@ -200,6 +200,41 @@ app.post('/webhook', async (req, res) => {
     if (u.bloqueado) return; // Ya está en manos tuyas
 
     // --------------------------------------------------------
+    // ESPERANDO NOMBRE (se revisa ANTES que paso 0)
+    // --------------------------------------------------------
+    if (u.esperandoNombre) {
+      const nombre = detectarNombre(texto) || texto.split(' ')[0];
+      u.nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
+      u.esperandoNombre = false;
+
+      if (!u.metodo) {
+        u.esperandoMetodo = true;
+        await enviarTexto(from, `Mucho gusto ${u.nombre} 😊 ¿En cuál de nuestros métodos estás interesada?\n\n• Mantequillas corporales\n• Exfoliantes corporales\n• Velas y jabones artesanales`);
+        return;
+      }
+
+      u.paso = 1;
+      await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
+      return;
+    }
+
+    // --------------------------------------------------------
+    // ESPERANDO MÉTODO (se revisa ANTES que paso 0)
+    // --------------------------------------------------------
+    if (u.esperandoMetodo) {
+      const metodo = detectarMetodo(texto);
+      if (metodo) {
+        u.metodo = metodo;
+        u.esperandoMetodo = false;
+        u.paso = 1;
+        await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
+      } else {
+        await enviarTexto(from, `¿Cuál te interesa más?\n\n• Mantequillas corporales\n• Exfoliantes corporales\n• Velas y jabones artesanales`);
+      }
+      return;
+    }
+
+    // --------------------------------------------------------
     // PASO 0: Primer mensaje — detectar nombre y método
     // --------------------------------------------------------
     if (u.paso === 0) {
@@ -226,41 +261,6 @@ app.post('/webhook', async (req, res) => {
       // Tiene todo — avanzar al mensaje 1
       u.paso = 1;
       await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
-      return;
-    }
-
-    // --------------------------------------------------------
-    // ESPERANDO NOMBRE
-    // --------------------------------------------------------
-    if (u.esperandoNombre) {
-      const nombre = detectarNombre(texto) || texto.split(' ')[0];
-      u.nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1).toLowerCase();
-      u.esperandoNombre = false;
-
-      if (!u.metodo) {
-        u.esperandoMetodo = true;
-        await enviarTexto(from, `Mucho gusto ${u.nombre} 😊 ¿En cuál de nuestros métodos estás interesada?\n\n• Mantequillas corporales\n• Exfoliantes corporales\n• Velas y jabones artesanales`);
-        return;
-      }
-
-      u.paso = 1;
-      await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
-      return;
-    }
-
-    // --------------------------------------------------------
-    // ESPERANDO MÉTODO
-    // --------------------------------------------------------
-    if (u.esperandoMetodo) {
-      const metodo = detectarMetodo(texto);
-      if (metodo) {
-        u.metodo = metodo;
-        u.esperandoMetodo = false;
-        u.paso = 1;
-        await enviarTexto(from, mensajes[u.metodo][1](u.nombre));
-      } else {
-        await enviarTexto(from, `¿Cuál te interesa más?\n\n• Mantequillas corporales\n• Exfoliantes corporales\n• Velas y jabones artesanales`);
-      }
       return;
     }
 
