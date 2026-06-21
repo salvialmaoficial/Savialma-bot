@@ -70,6 +70,24 @@ const mensajes = {
 // ============================================================
 const usuarios = {};
 
+// Estadísticas del día para el resumen
+const estadisticasHoy = {
+  fecha: new Date().toDateString(),
+  conversacionesNuevas: 0,
+  llegaronAMicroPregunta: 0,
+  cierresEnviados: 0
+};
+
+function resetearEstadisticasSiCambioDeDia() {
+  const hoy = new Date().toDateString();
+  if (estadisticasHoy.fecha !== hoy) {
+    estadisticasHoy.fecha = hoy;
+    estadisticasHoy.conversacionesNuevas = 0;
+    estadisticasHoy.llegaronAMicroPregunta = 0;
+    estadisticasHoy.cierresEnviados = 0;
+  }
+}
+
 // ============================================================
 // FUNCIONES DE DETECCIÓN
 // ============================================================
@@ -131,7 +149,13 @@ function obtenerPais(numero) {
 // FUNCIONES DE ENVÍO
 // ============================================================
 
-async function enviarTexto(para, texto) {
+function esperarAleatorio() {
+  const ms = (3 + Math.random() * 4) * 1000; // entre 3 y 7 segundos
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function enviarTexto(para, texto, conRetraso = true) {
+  if (conRetraso) await esperarAleatorio();
   await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
     messaging_product: 'whatsapp',
     to: para,
@@ -142,6 +166,7 @@ async function enviarTexto(para, texto) {
 }
 
 async function enviarImagen(para, url) {
+  await esperarAleatorio();
   await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
     messaging_product: 'whatsapp',
     to: para,
@@ -153,7 +178,8 @@ async function enviarImagen(para, url) {
 }
 
 async function notificarme(mensaje) {
-  await enviarTexto(MI_NUMERO, mensaje);
+  // Las notificaciones a ti van SIN retraso, deben llegar de inmediato
+  await enviarTexto(MI_NUMERO, mensaje, false);
 }
 
 // ============================================================
@@ -184,6 +210,29 @@ app.post('/webhook', async (req, res) => {
     const texto = message.text?.body?.trim() || '';
     const pais = obtenerPais(from);
 
+    resetearEstadisticasSiCambioDeDia();
+
+    // --------------------------------------------------------
+    // COMANDO ENVIAR: si el mensaje viene de TU número y empieza
+    // con "ENVIAR", reenviamos ese texto a la prospecta indicada
+    // --------------------------------------------------------
+    if (from === MI_NUMERO && texto.toUpperCase().startsWith('ENVIAR ')) {
+      const resto = texto.slice(7).trim(); // quita "ENVIAR "
+      const espacioIdx = resto.indexOf(' ');
+      if (espacioIdx === -1) {
+        await enviarTexto(MI_NUMERO, `Formato: ENVIAR <numero> <mensaje>`, false);
+        return;
+      }
+      const numeroDestino = resto.slice(0, espacioIdx).replace(/\D/g, '');
+      const mensajeParaEnviar = resto.slice(espacioIdx + 1);
+
+      await enviarTexto(numeroDestino, mensajeParaEnviar, false);
+      await enviarTexto(MI_NUMERO, `✅ Enviado a +${numeroDestino}`, false);
+
+      estadisticasHoy.cierresEnviados++;
+      return;
+    }
+
     // Inicializar usuario si no existe
     if (!usuarios[from]) {
       usuarios[from] = {
@@ -194,10 +243,19 @@ app.post('/webhook', async (req, res) => {
         esperandoMetodo: false,
         bloqueado: false
       };
+      estadisticasHoy.conversacionesNuevas++;
     }
 
     const u = usuarios[from];
-    if (u.bloqueado) return; // Ya está en manos tuyas
+
+    // --------------------------------------------------------
+    // SI YA ESTÁ BLOQUEADO (en tus manos): reenviarte el mensaje
+    // que la prospecta escriba, para que tengas visibilidad total
+    // --------------------------------------------------------
+    if (u.bloqueado) {
+      await enviarTexto(MI_NUMERO, `💬 ${u.nombre || 'Prospecta'} (+${from}) respondió:\n"${texto}"\n\nResponde con: ENVIAR ${from} <tu mensaje>`, false);
+      return;
+    }
 
     // --------------------------------------------------------
     // ESPERANDO NOMBRE (se revisa ANTES que paso 0)
@@ -291,6 +349,7 @@ app.post('/webhook', async (req, res) => {
     if (u.paso === 2) {
       if (esMensajeCorto(texto)) {
         u.paso = 3;
+        estadisticasHoy.llegaronAMicroPregunta++;
         await enviarTexto(from, `¿Qué es lo que más te detiene hoy para empezar algo así?`);
       } else {
         // Mensaje largo — notificarme y no responder
@@ -342,6 +401,26 @@ app.post('/webhook', async (req, res) => {
     }
   }
 });
+
+// ============================================================
+// RESUMEN DIARIO AUTOMÁTICO (se envía una vez, cerca de las 9pm)
+// ============================================================
+let resumenEnviadoHoy = false;
+
+setInterval(async () => {
+  resetearEstadisticasSiCambioDeDia();
+  const ahora = new Date();
+  const horaColombia = (ahora.getUTCHours() - 5 + 24) % 24; // UTC-5
+
+  if (horaColombia === 21 && !resumenEnviadoHoy) {
+    resumenEnviadoHoy = true;
+    await enviarTexto(MI_NUMERO, `📊 RESUMEN DEL DÍA\n\nConversaciones nuevas: ${estadisticasHoy.conversacionesNuevas}\nLlegaron a la pregunta de cierre: ${estadisticasHoy.llegaronAMicroPregunta}\nCierres que enviaste: ${estadisticasHoy.cierresEnviados}\n\n¡Buen trabajo gato! 💪`, false);
+  }
+
+  if (horaColombia !== 21) {
+    resumenEnviadoHoy = false;
+  }
+}, 30 * 60 * 1000); // revisa cada 30 minutos
 
 // ============================================================
 // INICIAR SERVIDOR
